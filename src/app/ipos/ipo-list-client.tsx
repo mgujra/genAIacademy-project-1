@@ -31,6 +31,8 @@ export function IpoListClient({
   const searchParams = useSearchParams();
   const [search, setSearch] = useState(initialFilters?.search ?? "");
   const [syncing, setSyncing] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
 
   function updateFilter(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -46,6 +48,31 @@ export function IpoListClient({
       router.refresh();
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleEnrich() {
+    setEnriching(true);
+    setEnrichMessage(null);
+    try {
+      const res = await fetch("/api/backfill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 10 }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEnrichMessage(
+          `Enriched ${data.processed} companies (${data.dates} dates, ${data.risks} risks, ${data.offers} offers)`,
+        );
+        router.refresh();
+      } else {
+        setEnrichMessage(data.error ?? "Enrichment failed");
+      }
+    } catch {
+      setEnrichMessage("Enrichment failed");
+    } finally {
+      setEnriching(false);
     }
   }
 
@@ -112,10 +139,20 @@ export function IpoListClient({
           <Button variant="outline" onClick={handleSync} disabled={syncing}>
             {syncing ? "Syncing..." : "Sync SEC Data"}
           </Button>
+          <Button onClick={handleEnrich} disabled={enriching}>
+            {enriching ? "Enriching..." : "Enrich IPO Data"}
+          </Button>
         </div>
       </div>
 
-      <p className="text-sm text-zinc-500">{total} IPO{total !== 1 ? "s" : ""} found</p>
+      {enrichMessage ? (
+        <p className="text-sm text-emerald-700 dark:text-emerald-400">{enrichMessage}</p>
+      ) : null}
+
+      <p className="text-sm text-zinc-500">
+        {total} IPO{total !== 1 ? "s" : ""} found · Target dates, risk, and prices require{" "}
+        <strong>Enrich IPO Data</strong> (or <code className="text-xs">npm run backfill</code>)
+      </p>
       <IpoTable items={initialItems} />
     </div>
   );

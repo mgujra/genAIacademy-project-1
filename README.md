@@ -82,6 +82,16 @@ drizzle/0000_init.sql
 npm run seed
 ```
 
+### 4b. Enrich IPO dates, risk, and prices (required for full data)
+
+SEC sync only loads companies and filings. Run backfill to populate target dates, risk scores, and prices:
+
+```bash
+npm run backfill
+```
+
+Or click **Enrich IPO Data** on the `/ipos` page. Re-run to process more companies (`BACKFILL_LIMIT=50 npm run backfill`).
+
 ### 5. Run locally
 
 ```bash

@@ -72,11 +72,19 @@ export function IpoTable({ items }: { items: IpoListItem[] }) {
                       </div>
                     </div>
                   ) : (
-                    "—"
+                    <span className="text-zinc-400" title="Run Enrich IPO Data">
+                      Pending
+                    </span>
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  {risk ? <RiskBadge level={risk.overallRisk} /> : "—"}
+                  {risk ? (
+                    <RiskBadge level={risk.overallRisk} />
+                  ) : (
+                    <span className="text-zinc-400" title="Run Enrich IPO Data">
+                      Pending
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3">{formatCurrency(pricing?.offerPrice)}</td>
                 <td className="px-4 py-3">{formatCurrency(pricing?.openingPrice)}</td>

@@ -31,6 +31,276 @@ export interface IpoListFilters {
   pageSize?: number;
 }
 
+type FilingRecord = {
+  formType: string;
+  accessionNumber: string;
+  filedAt: Date;
+  primaryDocument?: string | null;
+};
+
+/** Fast baseline target date from filing metadata — no SEC document download */
+export async function upsertBaselineDateEstimate(
+  companyId: string,
+  filings: FilingRecord[],
+) {
+  const db = getDb();
+
+  const existing = await db.query.ipoDateEstimates.findFirst({
+    where: eq(ipoDateEstimates.companyId, companyId),
+    orderBy: [desc(ipoDateEstimates.createdAt)],
+  });
+
+  if (existing) return false;
+
+  const sorted = [...filings].sort(
+    (a, b) => b.filedAt.getTime() - a.filedAt.getTime(),
+  );
+  const f424 = sorted.find((f) => f.formType === "424B4");
+  const effect = sorted.find((f) => f.formType === "EFFECT");
+  const registration = sorted.find((f) =>
+    ["S-1", "S-1/A", "F-1", "F-1/A"].includes(f.formType),
+  );
+
+  let targetDate: Date | null = null;
+  let confidence = 0.2;
+  let reasoning = "Insufficient filing data for date estimate.";
+  let sourceFilingIds: string[] = [];
+
+  if (f424) {
+    targetDate = f424.filedAt;
+    confidence = 0.85;
+    reasoning =
+      "Baseline estimate from 424B4 final prospectus filing date (IPO priced).";
+    sourceFilingIds = [f424.accessionNumber];
+  } else if (effect) {
+    targetDate = new Date(effect.filedAt);
+    targetDate.setDate(targetDate.getDate() + 3);
+    confidence = 0.65;
+    reasoning =
+      "Baseline estimate: registration effective; IPO typically within a few days.";
+    sourceFilingIds = [effect.accessionNumber];
+  } else if (registration) {
+    targetDate = new Date(registration.filedAt);
+    targetDate.setDate(targetDate.getDate() + 90);
+    confidence = 0.3;
+    reasoning =
+      "Baseline estimate: ~90 days after initial S-1/F-1 filing. Run enrich for refined date.";
+    sourceFilingIds = [registration.accessionNumber];
+  }
+
+  if (!targetDate) return false;
+
+  await db.insert(ipoDateEstimates).values({
+    companyId,
+    targetDate,
+    confidence,
+    reasoning,
+    sourceFilingIds,
+    agentVersion: "baseline-1.0",
+  });
+
+  return true;
+}
+
+/** Extract offer price from prospectus filings (works without a ticker) */
+export async function syncOfferPriceFromFilings(
+  companyId: string,
+  cik: string,
+  filings: FilingRecord[],
+) {
+  const db = getDb();
+
+  const prospectus =
+    filings.find((f) => f.formType === "424B4") ??
+    filings.find((f) => f.formType === "S-1/A") ??
+    filings.find((f) => f.formType === "S-1") ??
+    filings.find((f) => f.formType === "F-1");
+
+  if (!prospectus?.primaryDocument) return null;
+
+  try {
+    const html = await fetchFilingDocument(
+      cik,
+      prospectus.accessionNumber,
+      prospectus.primaryDocument,
+    );
+    const offerPrice = extractOfferPrice(html);
+    if (!offerPrice) return null;
+
+    await db
+      .insert(ipoPricing)
+      .values({
+        companyId,
+        offerPrice,
+        offerPriceSource: `${prospectus.formType} ${prospectus.accessionNumber}`,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: ipoPricing.companyId,
+        set: {
+          offerPrice,
+          offerPriceSource: `${prospectus.formType} ${prospectus.accessionNumber}`,
+          updatedAt: new Date(),
+        },
+      });
+
+    return offerPrice;
+  } catch {
+    return null;
+  }
+}
+
+export async function applyBaselineEstimatesToAll() {
+  const db = getDb();
+  const companies = await db.query.ipoCompanies.findMany({
+    with: {
+      filings: true,
+      dateEstimates: { limit: 1 },
+    },
+  });
+
+  let count = 0;
+  for (const company of companies) {
+    const created = await upsertBaselineDateEstimate(
+      company.id,
+      company.filings,
+    );
+    if (created) count++;
+  }
+  return count;
+}
+
+export async function enrichCompanyData(companyId: string) {
+  const db = getDb();
+  const company = await db.query.ipoCompanies.findFirst({
+    where: eq(ipoCompanies.id, companyId),
+    with: {
+      filings: true,
+      dateEstimates: { limit: 1 },
+      riskAssessments: { limit: 1 },
+      pricing: true,
+    },
+  });
+
+  if (!company) throw new Error("Company not found");
+
+  const result = {
+    company: company.name,
+    date: false,
+    risk: false,
+    offer: false,
+    prices: false,
+    errors: [] as string[],
+  };
+
+  const needsDate =
+    !company.dateEstimates[0] ||
+    (company.dateEstimates[0].confidence ?? 0) < 0.5;
+
+  if (needsDate) {
+    try {
+      await runDateCuratorForCompany(companyId);
+      result.date = true;
+    } catch (error) {
+      result.errors.push(
+        `date: ${error instanceof Error ? error.message : "failed"}`,
+      );
+    }
+  }
+
+  if (!company.riskAssessments[0]) {
+    try {
+      await runRiskAnalyzerForCompany(companyId);
+      result.risk = true;
+    } catch (error) {
+      result.errors.push(
+        `risk: ${error instanceof Error ? error.message : "failed"}`,
+      );
+    }
+  }
+
+  if (!company.pricing?.offerPrice) {
+    try {
+      const offer = await syncOfferPriceFromFilings(
+        companyId,
+        company.cik,
+        company.filings,
+      );
+      if (offer) result.offer = true;
+    } catch (error) {
+      result.errors.push(
+        `offer: ${error instanceof Error ? error.message : "failed"}`,
+      );
+    }
+  }
+
+  if (company.ticker) {
+    try {
+      await syncPricingForCompany(companyId);
+      result.prices = true;
+    } catch (error) {
+      result.errors.push(
+        `prices: ${error instanceof Error ? error.message : "failed"}`,
+      );
+    }
+  }
+
+  return result;
+}
+
+export async function backfillCompanyData(options: {
+  limit?: number;
+  onlyMissing?: boolean;
+} = {}) {
+  const limit = options.limit ?? 25;
+  const onlyMissing = options.onlyMissing ?? true;
+
+  const db = getDb();
+  const companies = await db.query.ipoCompanies.findMany({
+    with: {
+      dateEstimates: { limit: 1 },
+      riskAssessments: { limit: 1 },
+      pricing: true,
+    },
+    orderBy: [desc(ipoCompanies.updatedAt)],
+  });
+
+  const targets = companies
+    .filter((c) => {
+      if (!onlyMissing) return true;
+      const lowConfidence =
+        !c.dateEstimates[0] || (c.dateEstimates[0].confidence ?? 0) < 0.5;
+      const noRisk = !c.riskAssessments[0];
+      const noPricing = !c.pricing?.offerPrice && !c.pricing?.currentPrice;
+      return lowConfidence || noRisk || noPricing;
+    })
+    .slice(0, limit);
+
+  const summary = {
+    total: targets.length,
+    processed: 0,
+    dates: 0,
+    risks: 0,
+    offers: 0,
+    prices: 0,
+    errors: [] as Array<{ company: string; errors: string[] }>,
+  };
+
+  for (const company of targets) {
+    const result = await enrichCompanyData(company.id);
+    summary.processed++;
+    if (result.date) summary.dates++;
+    if (result.risk) summary.risks++;
+    if (result.offer) summary.offers++;
+    if (result.prices) summary.prices++;
+    if (result.errors.length > 0) {
+      summary.errors.push({ company: result.company, errors: result.errors });
+    }
+  }
+
+  return summary;
+}
+
 export async function syncSecFilings(daysBack = 90) {
   const db = getDb();
   const end = new Date();
@@ -110,6 +380,16 @@ export async function syncSecFilings(daysBack = 90) {
 
           filingsUpserted++;
         }
+
+        await upsertBaselineDateEstimate(
+          company.id,
+          submissions.filings.map((f) => ({
+            formType: f.formType,
+            accessionNumber: f.accessionNumber,
+            filedAt: new Date(f.filedAt),
+            primaryDocument: f.primaryDocument,
+          })),
+        );
       } catch (error) {
         console.error(`Failed to sync CIK ${cik}:`, error);
       }
@@ -304,27 +584,22 @@ export async function syncPricingForCompany(companyId: string) {
 
   if (!company?.ticker) return null;
 
-  const prospectus424 = company.filings.find((f) => f.formType === "424B4");
   let offerPrice: number | null = company.pricing?.offerPrice ?? null;
   let offerPriceSource = company.pricing?.offerPriceSource ?? null;
 
-  if (prospectus424?.primaryDocument && !offerPrice) {
-    try {
-      const html = await fetchFilingDocument(
-        company.cik,
-        prospectus424.accessionNumber,
-        prospectus424.primaryDocument,
-      );
-      offerPrice = extractOfferPrice(html);
-      offerPriceSource = `424B4 ${prospectus424.accessionNumber}`;
-    } catch {
-      // keep existing
-    }
+  if (!offerPrice) {
+    await syncOfferPriceFromFilings(companyId, company.cik, company.filings);
+    const refreshed = await db.query.ipoPricing.findFirst({
+      where: eq(ipoPricing.companyId, companyId),
+    });
+    offerPrice = refreshed?.offerPrice ?? null;
+    offerPriceSource = refreshed?.offerPriceSource ?? null;
   }
 
   const market = getMarketProvider();
   const quote = await market.getQuote(company.ticker);
 
+  const prospectus424 = company.filings.find((f) => f.formType === "424B4");
   const listingDate =
     company.listingDate ??
     (prospectus424 ? new Date(prospectus424.filedAt) : subMonths(new Date(), 3));
