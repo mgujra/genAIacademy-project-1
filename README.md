@@ -59,6 +59,23 @@ Optional:
 npm run db:push
 ```
 
+**Using Supabase?** If `db:push` crashes with a `checkValue.replace` error, this is a known drizzle-kit + Supabase issue. Fix it one of two ways:
+
+**Option A (recommended):** Add a direct connection string for migrations in `.env.local`:
+```bash
+# App runtime (transaction pooler, port 6543)
+DATABASE_URL=postgresql://postgres.[ref]:[password]@....pooler.supabase.com:6543/postgres
+
+# Migrations only (session/direct mode, port 5432)
+DATABASE_URL_MIGRATIONS=postgresql://postgres.[ref]:[password]@....pooler.supabase.com:5432/postgres
+```
+Then run `cp .env.local .env` and `npm run db:push` again.
+
+**Option B:** Run the SQL file manually in Supabase → SQL Editor:
+```
+drizzle/0000_init.sql
+```
+
 ### 4. Seed IPO data from SEC
 
 ```bash
