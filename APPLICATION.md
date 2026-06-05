@@ -2,6 +2,8 @@
 
 This document provides complete context for developers, operators, and users of the **IPO Tracker** application in the `genAIacademy-project-1` repository.
 
+> For system architecture diagrams, layer descriptions, and deployment topology, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ---
 
 ## What This Application Does
