@@ -213,7 +213,10 @@ export const priceSnapshots = pgTable(
 export const ipoCompaniesRelations = relations(ipoCompanies, ({ many, one }) => ({
   filings: many(ipoFilings),
   dateEstimates: many(ipoDateEstimates),
-  pricing: one(ipoPricing),
+  pricing: one(ipoPricing, {
+    fields: [ipoCompanies.id],
+    references: [ipoPricing.companyId],
+  }),
   riskAssessments: many(ipoRiskAssessments),
   priceSnapshots: many(priceSnapshots),
 }));
@@ -221,6 +224,34 @@ export const ipoCompaniesRelations = relations(ipoCompanies, ({ many, one }) => 
 export const ipoFilingsRelations = relations(ipoFilings, ({ one }) => ({
   company: one(ipoCompanies, {
     fields: [ipoFilings.companyId],
+    references: [ipoCompanies.id],
+  }),
+}));
+
+export const ipoDateEstimatesRelations = relations(ipoDateEstimates, ({ one }) => ({
+  company: one(ipoCompanies, {
+    fields: [ipoDateEstimates.companyId],
+    references: [ipoCompanies.id],
+  }),
+}));
+
+export const ipoPricingRelations = relations(ipoPricing, ({ one }) => ({
+  company: one(ipoCompanies, {
+    fields: [ipoPricing.companyId],
+    references: [ipoCompanies.id],
+  }),
+}));
+
+export const ipoRiskAssessmentsRelations = relations(ipoRiskAssessments, ({ one }) => ({
+  company: one(ipoCompanies, {
+    fields: [ipoRiskAssessments.companyId],
+    references: [ipoCompanies.id],
+  }),
+}));
+
+export const priceSnapshotsRelations = relations(priceSnapshots, ({ one }) => ({
+  company: one(ipoCompanies, {
+    fields: [priceSnapshots.companyId],
     references: [ipoCompanies.id],
   }),
 }));

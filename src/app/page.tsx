@@ -11,7 +11,8 @@ async function getStats() {
   if (!isDatabaseConfigured()) return null;
   try {
     return await getDashboardStats();
-  } catch {
+  } catch (error) {
+    console.error("[dashboard] Failed to load stats:", error);
     return null;
   }
 }

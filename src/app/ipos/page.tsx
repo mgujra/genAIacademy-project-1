@@ -9,14 +9,28 @@ async function loadIpoList(filters: {
   riskLevel?: string;
 }) {
   if (!isDatabaseConfigured()) {
-    return { items: [], total: 0, dbConfigured: false, error: false };
+    return {
+      items: [],
+      total: 0,
+      dbConfigured: false,
+      error: false,
+      errorMessage: null,
+    };
   }
 
   try {
     const { items, total } = await listIpos({ ...filters, pageSize: 50 });
-    return { items, total, dbConfigured: true, error: false };
-  } catch {
-    return { items: [], total: 0, dbConfigured: true, error: true };
+    return { items, total, dbConfigured: true, error: false, errorMessage: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown database error";
+    console.error("[/ipos] Failed to load IPO data:", error);
+    return {
+      items: [],
+      total: 0,
+      dbConfigured: true,
+      error: true,
+      errorMessage: message,
+    };
   }
 }
 
@@ -37,6 +51,7 @@ async function IpoListData({
       total={data.total}
       dbConfigured={data.dbConfigured}
       error={data.error}
+      errorMessage={data.errorMessage}
       initialFilters={{ status, search, riskLevel }}
     />
   );

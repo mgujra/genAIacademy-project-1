@@ -15,6 +15,14 @@ function useNeonDriver(url: string): boolean {
   return url.includes("neon.tech");
 }
 
+function isSupabaseUrl(url: string): boolean {
+  return url.includes("supabase.com");
+}
+
+function isSupabasePooler(url: string): boolean {
+  return isSupabaseUrl(url) && url.includes(":6543");
+}
+
 export function getDb(): DbInstance {
   if (_db) return _db;
 
@@ -32,7 +40,14 @@ export function getDb(): DbInstance {
   }
 
   // Supabase, local Postgres, and other standard PostgreSQL URLs
-  _postgresClient = postgres(url, { ssl: url.includes("supabase.com") ? "require" : undefined });
+  _postgresClient = postgres(url, {
+    ssl: isSupabaseUrl(url) ? "require" : undefined,
+    // Required for Supabase transaction pooler (port 6543)
+    prepare: !isSupabasePooler(url),
+    max: 10,
+    idle_timeout: 20,
+    connect_timeout: 10,
+  });
   _db = drizzlePostgres(_postgresClient, { schema });
   return _db;
 }

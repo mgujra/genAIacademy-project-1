@@ -11,6 +11,7 @@ interface IpoListClientProps {
   total: number;
   dbConfigured: boolean;
   error?: boolean;
+  errorMessage?: string | null;
   initialFilters?: {
     status?: string;
     search?: string;
@@ -23,6 +24,7 @@ export function IpoListClient({
   total,
   dbConfigured,
   error,
+  errorMessage,
   initialFilters,
 }: IpoListClientProps) {
   const router = useRouter();
@@ -58,7 +60,13 @@ export function IpoListClient({
   if (error) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-        Failed to load IPO data. Check database connection.
+        <p className="font-medium">Failed to load IPO data.</p>
+        <p className="mt-2">
+          {errorMessage ?? "Check DATABASE_URL in .env.local and restart the dev server."}
+        </p>
+        <p className="mt-2 text-xs">
+          Supabase tip: use the transaction pooler URL (port 6543) in DATABASE_URL for the app.
+        </p>
       </div>
     );
   }
