@@ -2,7 +2,9 @@
 
 IPO-centric investment research app with a background AI agent that monitors SEC filings, curates target IPO dates, evaluates prospectus risks, and tracks 6-month performance (offer, opening, and current prices).
 
-> **Full application guide:** See [APPLICATION.md](APPLICATION.md) for architecture, data flows, agent pipelines, API reference, and secret-handling guidelines.
+> **Documentation:**
+> - [ARCHITECTURE.md](ARCHITECTURE.md) — system architecture, layers, data flows, and deployment topology
+> - [APPLICATION.md](APPLICATION.md) — full user and operator guide, API reference, and secret-handling
 
 ## Features
 
