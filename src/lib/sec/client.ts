@@ -7,6 +7,12 @@ const SEC_BASE = "https://data.sec.gov";
 const EFTS_BASE = "https://efts.sec.gov/LATEST/search-index";
 const SEC_ARCHIVES = "https://www.sec.gov/Archives/edgar/data";
 
+/** Forms used to discover new IPO candidates (keeps SEC result sets small) */
+export const IPO_REGISTRATION_FORMS = ["S-1", "S-1/A", "F-1", "F-1/A"] as const;
+
+/** Max pagination offset before SEC EFTS commonly returns 500 errors */
+const MAX_EFTS_OFFSET = 300;
+
 class RateLimiter {
   private queue: Array<() => void> = [];
   private lastRequest = 0;
@@ -43,6 +49,10 @@ class RateLimiter {
 
 const limiter = new RateLimiter(8);
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function getUserAgent(): string {
   const ua = process.env.SEC_USER_AGENT;
   if (!ua) {
@@ -54,41 +64,81 @@ function getUserAgent(): string {
 }
 
 async function secFetch(url: string, init?: RequestInit): Promise<Response> {
-  return limiter.throttle(async () => {
-    const response = await fetch(url, {
-      ...init,
-      headers: {
-        "User-Agent": getUserAgent(),
-        Accept: "application/json",
-        ...init?.headers,
-      },
-      next: { revalidate: 3600 },
-    });
+  const maxRetries = 3;
 
-    if (!response.ok) {
-      throw new Error(`SEC request failed: ${response.status} ${url}`);
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const response = await limiter.throttle(async () =>
+      fetch(url, {
+        ...init,
+        headers: {
+          "User-Agent": getUserAgent(),
+          Accept: "application/json",
+          ...init?.headers,
+        },
+        next: { revalidate: 3600 },
+      }),
+    );
+
+    if (response.ok) return response;
+
+    // Retry on server errors and rate limits
+    if (
+      (response.status >= 500 || response.status === 429) &&
+      attempt < maxRetries - 1
+    ) {
+      await sleep(1000 * Math.pow(2, attempt));
+      continue;
     }
 
-    return response;
-  });
+    throw new Error(`SEC request failed: ${response.status} ${url}`);
+  }
+
+  throw new Error(`SEC request failed after retries: ${url}`);
 }
 
 async function secFetchText(url: string): Promise<string> {
-  return limiter.throttle(async () => {
-    const response = await fetch(url, {
+  const response = await limiter.throttle(async () =>
+    fetch(url, {
       headers: {
         "User-Agent": getUserAgent(),
         Accept: "text/html,application/xhtml+xml",
       },
       next: { revalidate: 3600 },
+    }),
+  );
+
+  if (!response.ok) {
+    throw new Error(`SEC document fetch failed: ${response.status} ${url}`);
+  }
+
+  return response.text();
+}
+
+function chunkDateRange(
+  startDate: string,
+  endDate: string,
+  daysPerChunk = 30,
+): Array<{ start: string; end: string }> {
+  const chunks: Array<{ start: string; end: string }> = [];
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  let cursor = new Date(start);
+  while (cursor <= end) {
+    const chunkEnd = new Date(cursor);
+    chunkEnd.setDate(chunkEnd.getDate() + daysPerChunk - 1);
+    const effectiveEnd = chunkEnd > end ? end : chunkEnd;
+
+    chunks.push({
+      start: cursor.toISOString().slice(0, 10),
+      end: effectiveEnd.toISOString().slice(0, 10),
     });
 
-    if (!response.ok) {
-      throw new Error(`SEC document fetch failed: ${response.status} ${url}`);
-    }
+    cursor = new Date(effectiveEnd);
+    cursor.setDate(cursor.getDate() + 1);
+  }
 
-    return response.text();
-  });
+  return chunks;
 }
 
 export async function searchIpoFilings(
@@ -96,11 +146,11 @@ export async function searchIpoFilings(
   endDate: string,
   from = 0,
   size = 100,
+  forms: readonly string[] = IPO_REGISTRATION_FORMS,
 ): Promise<{ hits: SecFilingHit[]; total: number }> {
-  const forms = IPO_FORM_TYPES.join(",");
   const params = new URLSearchParams({
     q: '"',
-    forms,
+    forms: forms.join(","),
     dateRange: "custom",
     startdt: startDate,
     enddt: endDate,
@@ -147,20 +197,44 @@ export async function getAllIpoFilingsInRange(
   startDate: string,
   endDate: string,
 ): Promise<SecFilingHit[]> {
+  const chunks = chunkDateRange(startDate, endDate, 30);
   const all: SecFilingHit[] = [];
-  let from = 0;
-  const size = 100;
+  const seen = new Set<string>();
 
-  while (true) {
-    const { hits, total } = await searchIpoFilings(
-      startDate,
-      endDate,
-      from,
-      size,
-    );
-    all.push(...hits);
-    from += size;
-    if (from >= total || hits.length === 0) break;
+  for (const chunk of chunks) {
+    let from = 0;
+    const size = 100;
+
+    while (from < MAX_EFTS_OFFSET) {
+      try {
+        const { hits, total } = await searchIpoFilings(
+          chunk.start,
+          chunk.end,
+          from,
+          size,
+        );
+
+        for (const hit of hits) {
+          if (!seen.has(hit.accessionNumber)) {
+            seen.add(hit.accessionNumber);
+            all.push(hit);
+          }
+        }
+
+        from += size;
+        if (from >= total || hits.length === 0) break;
+      } catch (error) {
+        // SEC EFTS often returns 500 on deep pagination — use partial results
+        if (from > 0) {
+          console.warn(
+            `SEC search stopped at offset ${from} for ${chunk.start}–${chunk.end}:`,
+            error instanceof Error ? error.message : error,
+          );
+          break;
+        }
+        throw error;
+      }
+    }
   }
 
   return all;

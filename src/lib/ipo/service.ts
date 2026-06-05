@@ -52,11 +52,7 @@ export async function syncSecFilings(daysBack = 90) {
 
   try {
     const filings = await getAllIpoFilingsInRange(startStr, endStr);
-    const ipoFilingsOnly = filings.filter((f) =>
-      ["S-1", "S-1/A", "F-1", "F-1/A"].includes(f.formType),
-    );
-
-    const ciks = [...new Set(ipoFilingsOnly.map((f) => f.cik))];
+    const ciks = [...new Set(filings.map((f) => f.cik))];
     let companiesUpserted = 0;
     let filingsUpserted = 0;
 

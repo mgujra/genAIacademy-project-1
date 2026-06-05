@@ -18,8 +18,9 @@ async function main() {
     process.exit(1);
   }
 
-  console.log("Starting SEC filing sync (last 90 days)...");
-  const result = await syncSecFilings(90);
+  const daysBack = Number(process.env.SEED_DAYS_BACK ?? 60);
+  console.log(`Starting SEC filing sync (last ${daysBack} days)...`);
+  const result = await syncSecFilings(daysBack);
   console.log("Sync complete:", result);
 
   const db = getDb();
