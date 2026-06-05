@@ -2,6 +2,8 @@
 
 IPO-centric investment research app with a background AI agent that monitors SEC filings, curates target IPO dates, evaluates prospectus risks, and tracks 6-month performance (offer, opening, and current prices).
 
+> **Full application guide:** See [APPLICATION.md](APPLICATION.md) for architecture, data flows, agent pipelines, API reference, and secret-handling guidelines.
+
 ## Features
 
 - **IPO Directory** — Lists upcoming and past IPOs sourced from SEC EDGAR (S-1, F-1, 424B4, EFFECT)
@@ -112,6 +114,20 @@ Returns database status, last SEC sync, and configured integrations.
 | `ipo-date-curator` | On new S-1 | Curates target IPO date |
 | `prospectus-risk-analyzer` | On filing update | Analyzes prospectus risks |
 | `ipo-price-sync` | Hourly | Updates offer/open/current prices |
+
+## Security & Secrets
+
+**Safe to commit:** source code, `.env.example` (placeholders only), documentation.
+
+**Never commit:** `.env`, `.env.local`, or any file containing real API keys, database passwords, or tokens. These are excluded by `.gitignore`.
+
+Before pushing, verify:
+```bash
+git status                    # No .env files listed
+git ls-files | grep '\.env'   # Only .env.example
+```
+
+Set real credentials in Vercel Environment Variables or a local `.env.local` file (not tracked by git).
 
 ## Disclaimer
 
