@@ -3,9 +3,33 @@ import { config } from "dotenv";
 // Load .env.local first (Next.js convention), then .env (CLI fallback)
 config({ path: ".env.local" });
 config({ path: ".env" });
+
 import { getDb } from "../src/db";
-import { syncSecFilings } from "../src/lib/ipo/service";
+import {
+  runDateCuratorForCompany,
+  runRiskAnalyzerForCompany,
+  syncSecFilings,
+} from "../src/lib/ipo/service";
 import { inngest } from "../src/inngest/client";
+
+const analyzeCount = Number(process.env.SEED_ANALYZE_COUNT ?? 3);
+
+async function runInlineAnalysis(companyId: string, companyName: string) {
+  console.log(`Running inline agent analysis for ${companyName}...`);
+  try {
+    await runDateCuratorForCompany(companyId);
+    console.log(`  ✓ Date curation complete for ${companyName}`);
+  } catch (error) {
+    console.warn(`  ✗ Date curation failed for ${companyName}:`, error);
+  }
+
+  try {
+    await runRiskAnalyzerForCompany(companyId);
+    console.log(`  ✓ Risk analysis complete for ${companyName}`);
+  } catch (error) {
+    console.warn(`  ✗ Risk analysis failed for ${companyName}:`, error);
+  }
+}
 
 async function main() {
   if (!process.env.DATABASE_URL) {
@@ -24,23 +48,46 @@ async function main() {
   console.log("Sync complete:", result);
 
   const db = getDb();
-  const companies = await db.query.ipoCompanies.findMany({ limit: 10 });
+  const companies = await db.query.ipoCompanies.findMany({
+    limit: analyzeCount,
+  });
 
-  console.log(`Triggering agent analysis for ${companies.length} companies...`);
+  if (companies.length === 0) {
+    console.log("No companies to analyze. Seed complete.");
+    return;
+  }
 
-  for (const company of companies) {
-    try {
-      await inngest.send({
-        name: "ipo/analyze.manual",
-        data: { companyId: company.id },
-      });
-      console.log(`Queued analysis for ${company.name}`);
-    } catch (error) {
-      console.warn(`Failed to queue ${company.name}:`, error);
+  const hasInngest = Boolean(process.env.INNGEST_EVENT_KEY);
+
+  if (hasInngest) {
+    console.log(
+      `Queueing agent analysis for ${companies.length} companies via Inngest...`,
+    );
+    for (const company of companies) {
+      try {
+        await inngest.send({
+          name: "ipo/analyze.manual",
+          data: { companyId: company.id },
+        });
+        console.log(`Queued analysis for ${company.name}`);
+      } catch (error) {
+        console.warn(`Failed to queue ${company.name}:`, error);
+      }
+    }
+  } else {
+    console.log(
+      `INNGEST_EVENT_KEY not set — running inline agent analysis for ${companies.length} companies...`,
+    );
+    console.log(
+      "(Set INNGEST_EVENT_KEY to queue via Inngest, or use 'Re-run Agent' on IPO detail pages)",
+    );
+    for (const company of companies) {
+      await runInlineAnalysis(company.id, company.name);
     }
   }
 
   console.log("Seed complete.");
+  console.log("Next step: npm run dev  →  http://localhost:3000");
 }
 
 main().catch((error) => {

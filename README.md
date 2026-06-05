@@ -90,7 +90,9 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-For Inngest background jobs locally, run the Inngest dev server in a separate terminal:
+**Agent analysis after seed:** Inngest is optional for local dev. Without `INNGEST_EVENT_KEY`, the seed script runs date/risk analysis inline for a few companies. You can also click **Re-run Agent** on any IPO detail page.
+
+For automatic background jobs locally, run the Inngest dev server in a separate terminal:
 
 ```bash
 npx inngest-cli@latest dev
