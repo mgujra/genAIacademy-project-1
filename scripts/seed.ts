@@ -1,4 +1,8 @@
-import "dotenv/config";
+import { config } from "dotenv";
+
+// Load .env.local first (Next.js convention), then .env (CLI fallback)
+config({ path: ".env.local" });
+config({ path: ".env" });
 import { getDb } from "../src/db";
 import { syncSecFilings } from "../src/lib/ipo/service";
 import { inngest } from "../src/inngest/client";

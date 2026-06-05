@@ -42,7 +42,7 @@ Required variables:
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | PostgreSQL connection string (Supabase, Neon, or local) |
 | `SEC_USER_AGENT` | `"AppName you@email.com"` — required by SEC |
 
 Optional:
